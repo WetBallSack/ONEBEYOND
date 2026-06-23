@@ -1,0 +1,186 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  SDP Service Record for Bluetooth HID Mouse Profile.
+  
+  This record advertises a 3-button relative mouse with scroll wheel
+  using the standard HID over Bluetooth (HIDP) protocol.
+  
+  Used by BlueZ via D-Bus ProfileManager1.RegisterProfile() with the
+  ServiceRecord option, or via sdptool.
+-->
+<record>
+  <!-- ServiceRecordHandle -->
+  <attribute id="0x0000">
+    <uint32 value="0x00010000" />
+  </attribute>
+
+  <!-- ServiceClassIDList: HumanInterfaceDeviceService -->
+  <attribute id="0x0001">
+    <sequence>
+      <uuid value="0x1124" />
+    </sequence>
+  </attribute>
+
+  <!-- ProtocolDescriptorList: L2CAP (PSM 17 Control) + HIDP -->
+  <attribute id="0x0004">
+    <sequence>
+      <sequence>
+        <uuid value="0x0100" />  <!-- L2CAP -->
+        <uint16 value="0x0011" /> <!-- PSM 17: HID Control -->
+      </sequence>
+      <sequence>
+        <uuid value="0x0011" />  <!-- HIDP -->
+      </sequence>
+    </sequence>
+  </attribute>
+
+  <!-- BrowseGroupList: PublicBrowseRoot -->
+  <attribute id="0x0005">
+    <sequence>
+      <uuid value="0x1002" />
+    </sequence>
+  </attribute>
+
+  <!-- LanguageBaseAttributeIDList -->
+  <attribute id="0x0006">
+    <sequence>
+      <uint16 value="0x656E" /> <!-- en -->
+      <uint16 value="0x006A" /> <!-- UTF-8 -->
+      <uint16 value="0x0100" /> <!-- PrimaryLanguageBaseID -->
+    </sequence>
+  </attribute>
+
+  <!-- BluetoothProfileDescriptorList: HID v1.1 -->
+  <attribute id="0x0009">
+    <sequence>
+      <sequence>
+        <uuid value="0x1124" />  <!-- HID Profile -->
+        <uint16 value="0x0101" /> <!-- Version 1.1 -->
+      </sequence>
+    </sequence>
+  </attribute>
+
+  <!-- AdditionalProtocolDescriptorList: L2CAP (PSM 19 Interrupt) + HIDP -->
+  <attribute id="0x000D">
+    <sequence>
+      <sequence>
+        <sequence>
+          <uuid value="0x0100" />  <!-- L2CAP -->
+          <uint16 value="0x0013" /> <!-- PSM 19: HID Interrupt -->
+        </sequence>
+        <sequence>
+          <uuid value="0x0011" />  <!-- HIDP -->
+        </sequence>
+      </sequence>
+    </sequence>
+  </attribute>
+
+  <!-- ServiceName -->
+  <attribute id="0x0100">
+    <text value="HID-Bridge Mouse" />
+  </attribute>
+
+  <!-- ServiceDescription -->
+  <attribute id="0x0101">
+    <text value="Bluetooth HID Mouse Emulator" />
+  </attribute>
+
+  <!-- ProviderName -->
+  <attribute id="0x0102">
+    <text value="HID-Bridge" />
+  </attribute>
+
+  <!-- HIDParserVersion -->
+  <attribute id="0x0201">
+    <uint16 value="0x0111" />
+  </attribute>
+
+  <!-- HIDDeviceSubclass: 0x80 = Pointing device (mouse) -->
+  <attribute id="0x0202">
+    <uint8 value="0x80" />
+  </attribute>
+
+  <!-- HIDCountryCode: 0x00 = Not localized -->
+  <attribute id="0x0203">
+    <uint8 value="0x00" />
+  </attribute>
+
+  <!-- HIDVirtualCable: true -->
+  <attribute id="0x0204">
+    <boolean value="true" />
+  </attribute>
+
+  <!-- HIDReconnectInitiate: true -->
+  <attribute id="0x0205">
+    <boolean value="true" />
+  </attribute>
+
+  <!-- HIDDescriptorList -->
+  <!--
+    HID Report Descriptor for 3-button relative mouse with wheel.
+    
+    Report format (4 bytes, no Report ID):
+      Byte 0: Buttons [bit0=Left, bit1=Right, bit2=Middle, bits3-7=padding]
+      Byte 1: X delta (signed 8-bit, -127..127)
+      Byte 2: Y delta (signed 8-bit, -127..127)
+      Byte 3: Wheel  (signed 8-bit, -127..127)
+    
+    Hex: 05 01 09 02 A1 01 09 01 A1 00 05 09 19 01 29 03
+         15 00 25 01 95 03 75 01 81 02 95 01 75 05 81 01
+         05 01 09 30 09 31 09 38 15 81 25 7F 75 08 95 03
+         81 06 C0 C0
+  -->
+  <attribute id="0x0206">
+    <sequence>
+      <sequence>
+        <uint8 value="0x22" /> <!-- Report Descriptor type -->
+        <text encoding="hex" value="05010902A1010901A1000509190129031500250195037501810295017505810105010930093109381581257F750895038106C0C0" />
+      </sequence>
+    </sequence>
+  </attribute>
+
+  <!-- HIDLANGIDBaseList -->
+  <attribute id="0x0207">
+    <sequence>
+      <sequence>
+        <uint16 value="0x0409" /> <!-- English (US) -->
+        <uint16 value="0x0100" />
+      </sequence>
+    </sequence>
+  </attribute>
+
+  <!-- HIDSDPDisable: false -->
+  <attribute id="0x0208">
+    <boolean value="false" />
+  </attribute>
+
+  <!-- HIDBatteryPower: true -->
+  <attribute id="0x0209">
+    <boolean value="true" />
+  </attribute>
+
+  <!-- HIDRemoteWake: true -->
+  <attribute id="0x020A">
+    <boolean value="true" />
+  </attribute>
+
+  <!-- HIDProfileVersion -->
+  <attribute id="0x020B">
+    <uint16 value="0x0100" />
+  </attribute>
+
+  <!-- HIDSupervisionTimeout -->
+  <attribute id="0x020C">
+    <uint16 value="0x0C80" /> <!-- 3200 = ~2 seconds -->
+  </attribute>
+
+  <!-- HIDNormallyConnectable: true -->
+  <attribute id="0x020D">
+    <boolean value="true" />
+  </attribute>
+
+  <!-- HIDBootDevice: true -->
+  <attribute id="0x020E">
+    <boolean value="true" />
+  </attribute>
+</record>

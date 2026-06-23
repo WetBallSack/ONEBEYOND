@@ -1,0 +1,10 @@
+^C:\USERS\XIAOBAO\.GEMINI\ANTIGRAVITY\SCRATCH\HID-BRIDGE\PRIMARY-PC-FORWARDER\CMAKELISTS.TXT
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/xiaobao/.gemini/antigravity/scratch/hid-bridge/primary-pc-forwarder -BC:/Users/xiaobao/.gemini/antigravity/scratch/hid-bridge/primary-pc-forwarder/build --check-stamp-file C:/Users/xiaobao/.gemini/antigravity/scratch/hid-bridge/primary-pc-forwarder/build/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

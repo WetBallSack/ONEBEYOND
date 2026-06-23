@@ -1,0 +1,3 @@
+C:/Users/xiaobao/.gemini/antigravity/scratch/hid-bridge/primary-pc-forwarder/build/CMakeFiles/hid_forwarder.dir
+C:/Users/xiaobao/.gemini/antigravity/scratch/hid-bridge/primary-pc-forwarder/build/CMakeFiles/ALL_BUILD.dir
+C:/Users/xiaobao/.gemini/antigravity/scratch/hid-bridge/primary-pc-forwarder/build/CMakeFiles/ZERO_CHECK.dir
