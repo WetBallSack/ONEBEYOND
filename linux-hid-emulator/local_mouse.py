@@ -1,80 +1,184 @@
 """
-local_mouse.py — Local mouse reader thread for /dev/input/mice.
+local_mouse.py — Local mouse reader thread (evdev-based).
 
-Reads raw 3-byte ImPS/2 packets from the Linux mice multiplexer device.
-Each packet contains button state and signed X/Y deltas. The Y axis is
-inverted relative to HID convention (positive = up in ImPS/2, positive =
-down in HID), so we negate dy before accumulating.
+Reads physical mouse input directly from /dev/input/event* using the
+evdev library, bypassing /dev/input/mice entirely. This fixes two bugs
+in the previous implementation:
 
-The thread automatically retries if the device is disconnected.
+  1. /dev/input/mice requires the mousedev kernel module, which is not
+     loaded on headless or live-USB Linux systems. Without it the device
+     either does not exist or blocks forever on read(), silently dropping
+     all local mouse input.
+
+  2. /dev/input/mice auto-negotiates packet size (3 or 4 bytes depending
+     on mouse protocol). Reading a fixed 3 bytes desyncs the stream on
+     any ImExPS/2 mouse, producing garbage deltas.
+
+evdev reads properly-typed, correctly-sized events directly from the
+kernel input layer and is not affected by either issue.
+
+Dependency: pip install evdev
 """
 
-import struct
+import select
 import time
 import threading
 import logging
 
 logger = logging.getLogger(__name__)
 
+try:
+    import evdev
+    from evdev import ecodes
+    _EVDEV_AVAILABLE = True
+except ImportError:
+    _EVDEV_AVAILABLE = False
+
 
 class LocalMouseReader(threading.Thread):
-    """Daemon thread that reads /dev/input/mice and feeds InputMerger."""
+    """Daemon thread that reads all local mice via evdev and feeds InputMerger."""
 
-    def __init__(self, merger, device: str = '/dev/input/mice', log_level: int = logging.INFO):
+    def __init__(self, merger, log_level: int = logging.INFO):
         super().__init__(name="LocalMouseReader", daemon=True)
         self._merger = merger
-        self._device = device
         self._running = False
-
         logger.setLevel(log_level)
 
+    # ------------------------------------------------------------------
+    # Thread entry point
+    # ------------------------------------------------------------------
+
     def run(self) -> None:
-        """Thread entry point — open device and read loop."""
         self._running = True
-        logger.info("Local mouse reader starting on %s", self._device)
+        logger.info("Local mouse reader starting (evdev)")
+
+        if not _EVDEV_AVAILABLE:
+            logger.error(
+                "evdev library is not installed — local mouse input disabled. "
+                "Fix: pip install evdev"
+            )
+            return
 
         while self._running:
             try:
                 self._read_loop()
-            except IOError as e:
-                if self._running:
-                    logger.warning("Device %s error: %s — retrying in 1s", self._device, e)
-                    time.sleep(1.0)
             except Exception as e:
                 if self._running:
-                    logger.error("Unexpected error reading %s: %s", self._device, e)
+                    logger.warning("Mouse reader error: %s — retrying in 1s", e)
                     time.sleep(1.0)
 
         logger.info("Local mouse reader stopped")
 
+    # ------------------------------------------------------------------
+    # Device discovery
+    # ------------------------------------------------------------------
+
+    def _find_mice(self) -> list:
+        """Scan /dev/input/event* and return all devices that have X/Y axes."""
+        mice = []
+        for path in evdev.list_devices():
+            try:
+                dev = evdev.InputDevice(path)
+                caps = dev.capabilities()
+                rel_axes = caps.get(ecodes.EV_REL, [])
+                if ecodes.REL_X in rel_axes and ecodes.REL_Y in rel_axes:
+                    mice.append(dev)
+                    logger.info("Found mouse: %s (%s)", dev.name, path)
+                else:
+                    dev.close()
+            except Exception as e:
+                logger.debug("Skipping %s: %s", path, e)
+        return mice
+
+    # ------------------------------------------------------------------
+    # Main read loop
+    # ------------------------------------------------------------------
+
     def _read_loop(self) -> None:
-        """Open the device and read 3-byte packets continuously."""
-        logger.info("Opening %s", self._device)
+        """Open all discovered mice and multiplex their events via select()."""
+        mice = self._find_mice()
 
-        with open(self._device, 'rb') as f:
-            logger.info("Device %s opened successfully", self._device)
+        if not mice:
+            logger.warning("No mice found in /dev/input/event* — retrying in 2s")
+            time.sleep(2.0)
+            return
 
-            while self._running:
-                data = f.read(3)
-                if not data or len(data) < 3:
-                    raise IOError("Short read from device (got %d bytes)" % (len(data) if data else 0))
+        logger.info("Monitoring %d mouse device(s)", len(mice))
 
-                # ImPS/2 3-byte packet format:
-                #   Byte 0: Button state — bit0=left, bit1=right, bit2=middle
-                #   Byte 1: X delta (signed 8-bit)
-                #   Byte 2: Y delta (signed 8-bit)
-                buttons = data[0] & 0x07  # Mask to 3 buttons
+        # Map file-descriptor → device so we can remove dead devices at runtime
+        fd_to_dev = {dev.fd: dev for dev in mice}
 
-                # Unpack signed deltas
-                dx, dy_raw = struct.unpack('bb', data[1:3])
+        # Per-device persistent button state (so held buttons survive across reads)
+        buttons_by_fd = {dev.fd: 0 for dev in mice}
 
-                # IMPORTANT: /dev/input/mice Y axis is inverted vs HID convention.
-                # In ImPS/2: positive Y = cursor moves UP
-                # In HID:    positive Y = cursor moves DOWN
-                # So we negate.
-                dy = -dy_raw
+        try:
+            while self._running and fd_to_dev:
+                try:
+                    readable, _, _ = select.select(list(fd_to_dev.keys()), [], [], 1.0)
+                except (ValueError, OSError):
+                    # A file descriptor became invalid; let the outer loop retry
+                    break
 
-                self._merger.accumulate(dx, dy, buttons, source='local')
+                for fd in readable:
+                    dev = fd_to_dev.get(fd)
+                    if dev is None:
+                        continue
+
+                    try:
+                        events = dev.read()
+                    except OSError as e:
+                        logger.warning("Device %s lost: %s — removing", dev.path, e)
+                        try:
+                            dev.close()
+                        except Exception:
+                            pass
+                        fd_to_dev.pop(fd, None)
+                        buttons_by_fd.pop(fd, None)
+                        continue
+
+                    dx = 0
+                    dy = 0
+                    btn = buttons_by_fd[fd]
+                    changed = False
+
+                    for event in events:
+                        if event.type == ecodes.EV_REL:
+                            if event.code == ecodes.REL_X:
+                                dx += event.value
+                                changed = True
+                            elif event.code == ecodes.REL_Y:
+                                dy += event.value
+                                changed = True
+
+                        elif event.type == ecodes.EV_KEY:
+                            pressed = bool(event.value)  # 1=down, 0=up, 2=repeat
+                            if event.code == ecodes.BTN_LEFT:
+                                btn = (btn | 0x01) if pressed else (btn & ~0x01)
+                                changed = True
+                            elif event.code == ecodes.BTN_RIGHT:
+                                btn = (btn | 0x02) if pressed else (btn & ~0x02)
+                                changed = True
+                            elif event.code == ecodes.BTN_MIDDLE:
+                                btn = (btn | 0x04) if pressed else (btn & ~0x04)
+                                changed = True
+
+                    if changed:
+                        buttons_by_fd[fd] = btn
+                        self._merger.accumulate(dx, dy, btn & 0x07, source='local')
+
+        finally:
+            for dev in fd_to_dev.values():
+                try:
+                    dev.close()
+                except Exception:
+                    pass
+
+        # If we fell out because all devices disconnected, retry discovery
+        if self._running:
+            logger.info("All mouse devices lost — rescanning in 2s")
+            time.sleep(2.0)
+
+    # ------------------------------------------------------------------
 
     def stop(self) -> None:
         """Signal the thread to stop."""
