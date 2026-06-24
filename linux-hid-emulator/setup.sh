@@ -17,10 +17,10 @@ fi
 echo "[1/4] Installing system dependencies..."
 apt-get update -qq
 apt-get install -y python3 python3-dbus python3-gi python3-venv python3-dev \
-    libdbus-1-dev libglib2.0-dev bluez bluez-tools
+    libdbus-1-dev libglib2.0-dev bluez bluez-tools python3-evdev
 echo "      Done."
 
-# Add current user to input group (for /dev/input/mice access)
+# Add current user to input group (for /dev/input/event* access)
 echo "[2/4] Configuring user permissions..."
 TARGET_USER="${SUDO_USER:-$USER}"
 if id -nG "$TARGET_USER" | grep -qw input; then
@@ -31,30 +31,29 @@ else
 fi
 
 # Configure BlueZ:
-#   -P input : Release HID L2CAP PSMs so our emulator can bind to them.
-#   --compat  : Enable legacy SDP server so sdptool can register records.
-# Both flags are required for this emulator to work.
+#   -P input,a2dp,avrcp,hfp,hsp,audio : Release HID L2CAP PSMs so our emulator
+#     can bind to them, and disable all audio profiles so Windows does not
+#     negotiate A2DP/HFP/HSP on the same connection.
+#   --compat : Enable legacy SDP server so sdptool can register records.
 echo "[3/5] Configuring BlueZ service flags..."
 BT_SERVICE="/lib/systemd/system/bluetooth.service"
 
 if [ ! -f "$BT_SERVICE" ]; then
-    # Try alternate location
     BT_SERVICE="/usr/lib/systemd/system/bluetooth.service"
 fi
 
 if [ ! -f "$BT_SERVICE" ]; then
     echo "      WARNING: Could not find bluetooth.service file."
-    echo "      Manually add '-P input --compat' to the ExecStart line in your bluetooth.service."
+    echo "      Manually add '-P input,a2dp,avrcp,hfp,hsp,audio --compat' to the ExecStart line in your bluetooth.service."
 else
-    # Idempotent: check each flag independently, add only what is missing
     NEEDS_UPDATE=false
 
-    if ! grep -q -- '-P input' "$BT_SERVICE"; then
-        sed -i 's|^ExecStart=.*bluetoothd.*|& -P input|' "$BT_SERVICE"
-        echo "      Added '-P input' (disables BlueZ input plugin)."
+    if ! grep -q -- '-P input,a2dp' "$BT_SERVICE"; then
+        sed -i 's|^ExecStart=.*bluetoothd.*|& -P input,a2dp,avrcp,hfp,hsp,audio|' "$BT_SERVICE"
+        echo "      Added '-P input,a2dp,avrcp,hfp,hsp,audio' (disables HID + all audio plugins)."
         NEEDS_UPDATE=true
     else
-        echo "      '-P input' already present."
+        echo "      '-P input,a2dp,avrcp,hfp,hsp,audio' already present."
     fi
 
     if ! grep -q -- '--compat' "$BT_SERVICE"; then
@@ -71,29 +70,22 @@ else
 fi
 
 # Write /etc/bluetooth/main.conf to set device class and name.
-# hciconfig is deprecated on modern Ubuntu — this is the correct method.
-# Class 0x002580:
-#   Major Service = 0x000 (none)
-#   Major Device  = 0x05  (Peripheral)
-#   Minor Device  = 0x80  (Pointing device / Mouse)
 echo "[4/5] Writing /etc/bluetooth/main.conf (device class + name)..."
 BT_CONF="/etc/bluetooth/main.conf"
 
-# Back up the existing config if it hasn't been backed up yet
 if [ -f "$BT_CONF" ] && [ ! -f "${BT_CONF}.bak" ]; then
     cp "$BT_CONF" "${BT_CONF}.bak"
     echo "      Backed up original config to ${BT_CONF}.bak"
 fi
 
-# Write a clean minimal config
-cat > "$BT_CONF" << 'EOF'
+cat > "$BT_CONF" << 'BTEOF'
 [General]
 # HID Bridge Mouse emulator - set by setup.sh
 Name = HID-Bridge Mouse
 Class = 0x002580
 DiscoverableTimeout = 0
 AlwaysPairable = true
-EOF
+BTEOF
 echo "      Written: Name=HID-Bridge Mouse, Class=0x002580 (Peripheral/Mouse)"
 
 # Reload and restart Bluetooth
